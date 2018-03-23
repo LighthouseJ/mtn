@@ -10,8 +10,9 @@ class MtnConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     options = { }
     generators = "cmake"
+    requires = "ffmpeg/3.4@bincrafters/stable", "libgd/2.2.4@nathanw/testing"
     exports = [ "CMakeLists.txt" ]
-    exports_sources = "mtn.c"
+    exports_sources = "*.c", "*.h"
 
     def build(self):
         cmake = CMake(self)
