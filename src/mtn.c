@@ -54,6 +54,9 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#define OPTPARSE_IMPLEMENTATION
+#include "optparse.h"
+
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
 #include "libswscale/swscale.h"
@@ -1486,7 +1489,7 @@ void make_thumbnail(char *file)
     thumbnail tn; // thumbnail data & info
     thumb_new(&tn);
     // shot sh; // shot info
-    shot fill_buffer[gb_c_column-1]; // skipped shots to fill the last row
+    shot fill_buffer[GB_C_COLUMN - 1]; // skipped shots to fill the last row
     for (i=0; i<gb_c_column-1; i++) {
         fill_buffer[i].ip = NULL;
     }
@@ -1640,7 +1643,7 @@ void make_thumbnail(char *file)
         goto cleanup;
     }
     pCodecCtx->get_buffer2 = our_get_buffer;
-    pCodecCtx->release_buffer = our_release_buffer;
+    //pCodecCtx->release_buffer = our_release_buffer;
 
     // Allocate video frame
     pFrame = avcodec_alloc_frame();
@@ -2737,11 +2740,12 @@ int main(int argc, char *argv[])
     /* get & check options */
     int parse_error = 0;
     int c;
+	struct optparse opts;
     while (-1 != (c = getopt(argc, argv, "a:b:B:c:C:D:e:E:f:F:g:h:iIj:k:L:nN:o:O:pPqr:s:tT:vVw:WzZ"))) {
         switch (c) {
         double tmp_a_ratio = 0;
         case 'a':
-            if (0 == get_double_opt('a', &tmp_a_ratio, optarg, 1)) { // success
+            if (0 == get_double_opt('a', &tmp_a_ratio, opts.optarg, 1)) { // success
                 gb_a_ratio.num = tmp_a_ratio * 10000;
                 gb_a_ratio.den = 10000;
             } else {
@@ -2749,7 +2753,7 @@ int main(int argc, char *argv[])
             }
             break;
         case 'b':
-            parse_error += get_double_opt('b', &gb_b_blank, optarg, 0);
+            parse_error += get_double_opt('b', &gb_b_blank, opts.optarg, 0);
             if (gb_b_blank < .2) {
                 av_log(NULL, LOG_INFO, "%s: -b %.2f might be too extreme; try -b .5\n", gb_argv0, gb_b_blank);
             }
@@ -2759,41 +2763,41 @@ int main(int argc, char *argv[])
             }
             break;
         case 'B':
-            parse_error += get_double_opt('B', &gb_B_begin, optarg, 0);
+            parse_error += get_double_opt('B', &gb_B_begin, opts.optarg, 0);
             break;
         case 'c':
-            parse_error += get_int_opt('c', &gb_c_column, optarg, 1);
+            parse_error += get_int_opt('c', &gb_c_column, opts.optarg, 1);
             break;
         case 'C':
-            parse_error += get_double_opt('C', &gb_C_cut, optarg, 1);
+            parse_error += get_double_opt('C', &gb_C_cut, opts.optarg, 1);
             break;
         case 'D':
-            parse_error += get_int_opt('D', &gb_D_edge, optarg, 0);
+            parse_error += get_int_opt('D', &gb_D_edge, opts.optarg, 0);
             if (gb_D_edge > 0 
                 && (gb_D_edge < 4 || gb_D_edge > 12)) {
                 av_log(NULL, LOG_INFO, "%s: -D%d might be too extreme; try -D4, -D6, or -D8\n", gb_argv0, gb_D_edge);
             }
             break;
         case 'e':
-            gb_e_ext = optarg;
+            gb_e_ext = opts.optarg;
             break;
         case 'E':
-            parse_error += get_double_opt('E', &gb_E_end, optarg, 0);
+            parse_error += get_double_opt('E', &gb_E_end, opts.optarg, 0);
             break;
         case 'f':
-            gb_f_fontname = optarg;
+            gb_f_fontname = opts.optarg;
             if (0 == strcmp(gb_F_ts_fontname, GB_F_FONTNAME)) {
                 gb_F_ts_fontname = gb_f_fontname;
             }
             break;
         case 'F':
-            parse_error += get_format_opt('F', optarg);
+            parse_error += get_format_opt('F', opts.optarg);
             break;
         case 'g':
-            parse_error += get_int_opt('g', &gb_g_gap, optarg, 0);
+            parse_error += get_int_opt('g', &gb_g_gap, opts.optarg, 0);
             break;
         case 'h':
-            parse_error += get_int_opt('h', &gb_h_height, optarg, 0);
+            parse_error += get_int_opt('h', &gb_h_height, opts.optarg, 0);
             break;
         case 'i':
             gb_i_info = 0;
@@ -2802,25 +2806,25 @@ int main(int argc, char *argv[])
             gb_I_individual = 1;
             break;
         case 'j':
-            parse_error += get_int_opt('j', &gb_j_quality, optarg, 1);
+            parse_error += get_int_opt('j', &gb_j_quality, opts.optarg, 1);
             break;
         case 'k': // background color
-            parse_error += get_color_opt('k', &gb_k_bcolor, optarg);
+            parse_error += get_color_opt('k', &gb_k_bcolor, opts.optarg);
             break;
         case 'L':
-            parse_error += get_location_opt('L', optarg);
+            parse_error += get_location_opt('L', opts.optarg);
             break;
         case 'n':
             gb_n_normal = 1; // normal priority
             break;
         case 'N':
-            gb_N_suffix = optarg;
+            gb_N_suffix = opts.optarg;
             break;
         case 'o':
-            gb_o_suffix = optarg;
+            gb_o_suffix = opts.optarg;
             break;
         case 'O':
-            gb_O_outdir = optarg;
+            gb_O_outdir = opts.optarg;
             rem_trailing_slash(gb_O_outdir);
             break;
         case 'p':
@@ -2833,16 +2837,16 @@ int main(int argc, char *argv[])
             gb_q_quiet = 1; //quiet
             break;
         case 'r':
-            parse_error += get_int_opt('r', &gb_r_row, optarg, 0);
+            parse_error += get_int_opt('r', &gb_r_row, opts.optarg, 0);
             break;
         case 's':
-            parse_error += get_int_opt('s', &gb_s_step, optarg, 0);
+            parse_error += get_int_opt('s', &gb_s_step, opts.optarg, 0);
             break;
         case 't':
             gb_t_timestamp = 0; // off
             break;
         case 'T':
-            gb_T_text = optarg;
+            gb_T_text = opts.optarg;
             break;
         case 'v':
             gb_v_verbose = 1; // verbose
@@ -2852,7 +2856,7 @@ int main(int argc, char *argv[])
             av_log(NULL, LOG_INFO, "%s: -V is only used for debugging\n", gb_argv0);
             break;
         case 'w':
-            parse_error += get_int_opt('w', &gb_w_width, optarg, 0);
+            parse_error += get_int_opt('w', &gb_w_width, opts.optarg, 0);
             break;
         case 'W':
             gb_W_overwrite = 0;
@@ -2869,7 +2873,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (optind == argc) {
+    if (opts.optind == argc) {
         av_log(NULL, AV_LOG_ERROR, "%s: no input files or directories specified\n", gb_argv0);
         parse_error += 1;
     }
@@ -2930,7 +2934,7 @@ int main(int argc, char *argv[])
     //gdUseFontConfig(1); // set GD to use fontconfig patterns
 
     /* process movie files */
-    process_loop(argc - optind, argv + optind);
+    process_loop(argc - opts.optind, argv + opts.optind);
 
   exit:
     // clean up

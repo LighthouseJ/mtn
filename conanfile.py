@@ -8,15 +8,16 @@ class MtnConan(ConanFile):
     url = "<Package recipe repository url here, for issues about the package>"
     description = "<Description of Mtn here>"
     settings = "os", "compiler", "build_type", "arch"
-    options = { }
+    options = {"shared": [True, False]}
+    default_options = "shared=False"
     generators = "cmake"
     requires = "ffmpeg/3.4@bincrafters/stable", "libgd/2.2.4@nathanw/testing"
-    exports = [ "CMakeLists.txt" ]
-    exports_sources = "*.c", "*.h"
+    exports = [ "src/CMakeLists.txt" ]
+    exports_sources = "src/*.h", "src/*.c"
 
     def build(self):
         cmake = CMake(self)
-        cmake.configure()
+        cmake.configure(source_dir='src')
         cmake.build()
         cmake.install()
         
