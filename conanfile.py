@@ -6,7 +6,7 @@ class MtnConan(ConanFile):
     version = "2008a"
     license = "<Put the package license here>"
     url = "<Package recipe repository url here, for issues about the package>"
-    description = "<Description of Mtn here>"
+    description = "movie thumbnailer"
     settings = "os", "compiler", "build_type", "arch"
     options = {"shared": [True, False]}
     default_options = "shared=False"

@@ -64,6 +64,7 @@
 #include "gd.h"
 
 #include "warn_unused.h"
+#include "win_util.h"
 
 #define UTF8_FILENAME_SIZE (FILENAME_MAX*4)
 
@@ -149,7 +150,7 @@ int gb_c_column = GB_C_COLUMN;
 #define GB_C_CUT -1
 double gb_C_cut = GB_C_CUT; // cut movie; <=0 off
 #define GB_D_EDGE 12
-int gb_D_edge = GB_D_EDGE; // edge detection; 0 off; >0 on
+float gb_D_edge = (float)GB_D_EDGE; // edge detection; 0 off; >0 on
 #define GB_E_EXT NULL
 char *gb_e_ext = GB_E_EXT;
 #define GB_E_END 0.0
@@ -245,22 +246,22 @@ char *strlaststr (char *haystack, char *needle)
 char *format_color(rgb_color col)
 {
     static char buf[7]; // FIXME
-    sprintf(buf, "%02X%02X%02X", col.r, col.g, col.b);
+    sprintf_s(buf, 7, "%02X%02X%02X", col.r, col.g, col.b);
     return buf; // FIXME
 }
 
-void format_time(double duration, char *str, char sep)
+void format_time(double duration, char *str, size_t str_len, char sep)
 {
     if (duration < 0) {
-        sprintf(str, "N/A");
+        sprintf_s(str, str_len, "N/A");
     } else {
         int hours, mins, secs;
-        secs = duration;
+        secs = (int)duration;
         mins = secs / 60;
         secs %= 60;
         hours = mins / 60;
         mins %= 60;
-        sprintf(str, "%02d%c%02d%c%02d", hours, sep, mins, sep, secs);
+        sprintf_s(str, str_len, "%02d%c%02d%c%02d", hours, sep, mins, sep, secs);
     }
 }
 
@@ -269,13 +270,13 @@ char *format_size(int64_t size, char *unit)
     static char buf[20]; // FIXME
 
     if (size < 1024) {
-        sprintf(buf, "%"PRId64" %s", size, unit);
+        sprintf_s(buf, 20, "%"PRId64" %s", size, unit);
     } else if (size < 1024*1024) {
-        sprintf(buf, "%.2f Ki%s", size/1024.0, unit);
+		sprintf_s(buf, 20, "%.2f Ki%s", size/1024.0, unit);
     } else if (size < 1024*1024*1024) {
-        sprintf(buf, "%.2f Mi%s", size/1024.0/1024, unit);
+		sprintf_s(buf, 20, "%.2f Mi%s", size/1024.0/1024, unit);
     } else {
-        sprintf(buf, "%.2f Gi%s", size/1024.0/1024/1024, unit);
+		sprintf_s(buf, 20, "%.2f Gi%s", size/1024.0/1024/1024, unit);
     }
     return buf;
 }
@@ -286,12 +287,12 @@ FIXME: wont work in unix if filename has '\\', e.g. path = "hello \\ world";
 */
 char *path_2_file(char *path)
 {
-    int len = strlen(path);
+    size_t len = strlen(path);
     char *slash = strrchr(path, '/');
     char *backslash = strrchr(path, '\\');
     if (NULL != slash || NULL != backslash) {
         char *last = (slash > backslash) ? slash : backslash;
-        if (last - path + 1 < len) { // make sure last char is not '/' or '\\'
+        if ((size_t)(last - path + 1) < len) { // make sure last char is not '/' or '\\'
             return last + 1;
         }
     }
@@ -303,18 +304,18 @@ copy n strings to dst
 ... must be char *
 dst must be large enough
 */
-char *strcpy_va(char *dst, int n, ...)
+char *strcpy_va(char *dst, size_t dst_size, int n, ...)
 {
     va_list ap;
-    int pos = 0;
+    size_t pos = 0;
     dst[pos] = '\0';
     va_start(ap, n);
     int i;
     for (i=0; i < n; i++) {
         char *s = va_arg(ap, char *);
         assert(NULL != s);
-        int len = strlen(s);
-        strncpy(dst + pos, s, len + 1); // for '\0'
+        size_t len = strlen(s);
+        strncpy_s(dst + pos, dst_size, s, len + 1); // for '\0'
         pos += len;
     }
     va_end(ap);
@@ -358,6 +359,7 @@ int is_reg_newer(char *file, time_t st_time)
     if (0 != _tstat(file_w, &buf)) {
         return 0;
     }
+	
     return S_ISREG(buf.st_mode) && (difftime(buf.st_mtime, st_time) >= 0);
 }
 
@@ -389,7 +391,7 @@ char *rem_trailing_slash(char *str)
 #ifdef WIN32
     // mingw doesn't seem to be happy about trailing '/' or '\\'
     // strip trailing '/' or '\\' that might get added by shell filename completion for directories
-    int last_index = strlen(str) - 1;
+    size_t last_index = strlen(str) - 1;
     // we need last '/' or '\\' for root drive "c:\"
     while (last_index > 2 && 
         ('/' == str[last_index] || '\\' == str[last_index])) {
@@ -532,7 +534,8 @@ int save_jpg(gdImagePtr ip, char *outname)
 #endif
 
     int done = -1;
-    FILE *fp = _tfopen(outname_w, _TEXT("wb"));
+	FILE *fp;
+	errno_t open_err = _tfopen_s(&fp, outname_w, _TEXT("wb"));
     if (NULL == fp) {
         goto cleanup;
     }
@@ -812,12 +815,12 @@ void save_AVFrame(AVFrame *pFrame, int src_width, int src_height, int pix_fmt,
     struct SwsContext *pSwsCtx = NULL;
     gdImagePtr ip = NULL;
 
-    pFrameRGB = avcodec_alloc_frame();
+    pFrameRGB = av_frame_alloc();
     if (pFrameRGB == NULL) {
         av_log(NULL, AV_LOG_ERROR, "  couldn't allocate a video frame\n");
         goto cleanup;
     }
-    int rgb_bufsize = avpicture_get_size(AV_PIX_FMT_RGB24, dst_width, dst_height);
+    size_t rgb_bufsize = av_image_get_buffer_size(AV_PIX_FMT_RGB24, dst_width, dst_height);
     rgb_buffer = av_malloc(rgb_bufsize);
     if (NULL == rgb_buffer) {
         av_log(NULL, AV_LOG_ERROR, "  av_malloc %d bytes failed\n", rgb_bufsize);
@@ -1208,7 +1211,7 @@ int read_and_decode(AVFormatContext *pFormatCtx, int video_index,
         //|| (1 == key_only && !(1 == pFrame->key_frame && FF_I_TYPE == pFrame->pict_type)); // same as version 0.61
         || (1 == key_only && !(1 == pFrame->key_frame || AV_PICTURE_TYPE_I == pFrame->pict_type)); // same as version 2.42
         //|| (1 == key_only && 1 != pFrame->key_frame); // is there a reason why not use this? t_warhawk_review_gt_h264.mov (svq3) seems to set only pict_type
-        av_free_packet(&packet)) {
+		av_packet_unref(&packet)) {
 
         if (0 != av_read_frame(pFormatCtx, &packet)) {
             if (pFormatCtx->pb->error != 0) { // from ffplay - not documented
@@ -1252,7 +1255,7 @@ int read_and_decode(AVFormatContext *pFormatCtx, int video_index,
             }
             if (1000 == pkt_without_pic) { // is 1000 enough? // FIXME
                 av_log(NULL, AV_LOG_ERROR, "  * avcodec_decode_video couldn't decode picture\n");
-                av_free_packet(&packet);
+				av_packet_unref(&packet);
                 return -1;
             }
         } else {
@@ -1285,7 +1288,7 @@ int read_and_decode(AVFormatContext *pFormatCtx, int video_index,
         //av_log(NULL, AV_LOG_VERBOSE, "*after avcodec_decode_video pts: %.2f\n", pts);
         */
     }
-    av_free_packet(&packet);
+	av_packet_unref(&packet);
 
     // stats & enable skipping of non key packets
     run++;
@@ -1453,7 +1456,7 @@ by inserting a unique string before suffix.
 if unum is != 0, it'll be used
 returns the unique number
 */
-int make_unique_name(char *name, char *suffix, int unum)
+int make_unique_name(char *name, size_t name_len, char *suffix, int unum)
 {
     // tmpnam() in mingw always return names which start with \ -- unuseable.
     // so we'll use random number instead.
@@ -1462,13 +1465,13 @@ int make_unique_name(char *name, char *suffix, int unum)
     if (unum == 0) {
         unum = rand();
     }
-    sprintf(unique, "_%d", unum);
+    sprintf_s(unique, FILENAME_MAX, "_%d", unum);
 
     char *found = strlaststr(name, suffix);
     if (NULL == found || found == name) {
-        strcat(name, unique); // this shouldn't happen
+        strcat_s(name, name_len, unique); // this shouldn't happen
     } else {
-        strcat(unique, found);
+        strcat_s(unique, FILENAME_MAX, found);
         strcpy(found, unique);
     }
     return unum;
@@ -1540,11 +1543,11 @@ void make_thumbnail(char *file)
     // we'll not overwrite and use a new name
     int unum = 0;
     if (is_reg_newer(tn.out_filename, gb_st_start)) {
-        unum = make_unique_name(tn.out_filename, gb_o_suffix, unum);
+        unum = make_unique_name(tn.out_filename, UTF8_FILENAME_SIZE, gb_o_suffix, unum);
         av_log(NULL, LOG_INFO, "%s: output file already exists. using: %s\n", gb_argv0, tn.out_filename);
     }
     if (NULL != gb_N_suffix && is_reg_newer(tn.info_filename, gb_st_start)) {
-        unum = make_unique_name(tn.info_filename, gb_N_suffix, unum);
+        unum = make_unique_name(tn.info_filename, UTF8_FILENAME_SIZE, gb_N_suffix, unum);
         av_log(NULL, LOG_INFO, "%s: info file already exists. using: %s\n", gb_argv0, tn.info_filename);
     }
     if (0 == gb_W_overwrite) { // dont overwrite mode
@@ -1910,7 +1913,7 @@ void make_thumbnail(char *file)
         int64_t eff_target = seek_target + seek_evade; // effective target
         eff_target = MAX(eff_target, start_time_tb); // make sure eff_target > start_time
         char time_tmp[15]; // FIXME
-        format_time(calc_time(eff_target, pStream->time_base, start_time), time_tmp, ':');
+        format_time(calc_time(eff_target, pStream->time_base, start_time), time_tmp, 15, ':');
 
         /* for some formats, previous seek might over shoot pass this seek_target; is this a bug in libavcodec? */
         if (prevshot_pts > eff_target && 0 == evade_try) {
@@ -1925,7 +1928,7 @@ void make_thumbnail(char *file)
         if (eff_target > duration_tb) { // end of file
             goto eof;
         }
-        format_time(calc_time(eff_target, pStream->time_base, start_time), time_tmp, ':');
+        format_time(calc_time(eff_target, pStream->time_base, start_time), time_tmp, 15, ':');
         av_log(NULL, AV_LOG_VERBOSE, "\n***eff_target tb: %"PRId64", eff_target s:%.2f (%s), prevshot_pts: %"PRId64"\n", 
             eff_target, calc_time(eff_target, pStream->time_base, start_time), time_tmp, prevshot_pts);
 
@@ -2073,7 +2076,7 @@ void make_thumbnail(char *file)
 
             // not found -- skip shot
             char time_tmp[15]; // FIXME
-            format_time(calc_time(seek_target, pStream->time_base, start_time), time_tmp, ':');
+            format_time(calc_time(seek_target, pStream->time_base, start_time), time_tmp, 15, ':');
             av_log(NULL, LOG_INFO, "  * blank %.2f or no edge * skipping shot at %s after %d tries\n", blank, time_tmp, evade_try);
             thumb_nb--; // reduce # shots
             goto skip_shot;
@@ -2102,7 +2105,7 @@ void make_thumbnail(char *file)
         // FIXME: this frame might not actually be at the requested position. is pts correct?
         if (1 == t_timestamp) { // on
             char time_str[15]; // FIXME
-            format_time(calc_time(found_pts, pStream->time_base, start_time), time_str, ':');
+            format_time(calc_time(found_pts, pStream->time_base, start_time), time_str, 15, ':');
             char *str_ret = image_string(ip, 
                 gb_F_ts_fontname, gb_F_ts_color, gb_F_ts_font_size, 
                 gb_L_time_location, 0, time_str, 1, gb_F_ts_shadow);
@@ -2122,7 +2125,7 @@ void make_thumbnail(char *file)
         /* save individual shots */
         if (1 == gb_I_individual) {
             char time_str[15]; // FIXME
-            format_time(calc_time(found_pts, pStream->time_base, start_time), time_str, '_');
+            format_time(calc_time(found_pts, pStream->time_base, start_time), time_str, 15, '_');
             char individual_filename[UTF8_FILENAME_SIZE]; // FIXME
             strcpy(individual_filename, tn.out_filename);
             char *suffix = strstr(individual_filename, gb_o_suffix);
@@ -2295,14 +2298,8 @@ void process_loop(int n, char **files);
 */
 void process_dir(char *dir)
 {
-#if defined(WIN32) && defined(_UNICODE)
-    wchar_t dir_w[FILENAME_MAX];
-    UTF8_2_WC(dir_w, dir, FILENAME_MAX);
-#else
-    char *dir_w = dir;
-#endif
 
-    DIR *dp = _topendir(dir_w);
+    DIR *dp = opendir(dir);
     if (NULL == dp) {
         av_log(NULL, AV_LOG_ERROR, "\n%s: opendir failed: %s\n", dir, strerror(errno));
         return;
@@ -2374,7 +2371,7 @@ void process_dir(char *dir)
     while (cnt > 0)
         free(v[--cnt]);
     free(v);
-    _tclosedir(dp);
+    closedir(dp);
 }
 
 /*
@@ -2741,12 +2738,14 @@ int main(int argc, char *argv[])
     int parse_error = 0;
     int c;
 	struct optparse opts;
-    while (-1 != (c = getopt(argc, argv, "a:b:B:c:C:D:e:E:f:F:g:h:iIj:k:L:nN:o:O:pPqr:s:tT:vVw:WzZ"))) {
+	optparse_init(&opts, argv);
+    while (-1 != (c = optparse(&opts, "a:b:B:c:C:D:e:E:f:F:g:h:iIj:k:L:nN:o:O:pPqr:s:tT:vVw:WzZ")))
+	{
         switch (c) {
         double tmp_a_ratio = 0;
         case 'a':
             if (0 == get_double_opt('a', &tmp_a_ratio, opts.optarg, 1)) { // success
-                gb_a_ratio.num = tmp_a_ratio * 10000;
+                gb_a_ratio.num = (int)tmp_a_ratio * 10000;
                 gb_a_ratio.den = 10000;
             } else {
                 parse_error++;
