@@ -66,6 +66,7 @@
 
 #include "warn_unused.h"
 #include "win_util.h"
+#include "libavformat_dump.h"
 
 #define UTF8_FILENAME_SIZE (FILENAME_MAX*4)
 
@@ -936,191 +937,6 @@ void calc_scale_src(int width, int height, AVRational ratio, int *scaled_w, int 
     }
 }
 
-/*
-modified from libavformat's dump_format
-*/
-void get_stream_info_type(AVFormatContext *ic, enum CodecType type, char *buf, size_t buf_len, AVRational sample_aspect_ratio)
-{
-    char sub_buf[1024] = ""; // FIXME
-    unsigned int i;
-    for(i=0; i<ic->nb_streams; i++) {
-        char codec_buf[256];
-        int flags = ic->iformat->flags;
-        AVStream *st = ic->streams[i];
-
-        if (type != st->codec->codec_type) {
-            continue;
-        }
-
-        if (AVMEDIA_TYPE_SUBTITLE == st->codec->codec_type) 
-		{
-			AVDictionaryEntry *lang = av_dict_get(st->metadata, "language", NULL, 0);
-            if (strlen(lang->value) > 0) {
-                sprintf_s(sub_buf + strlen(sub_buf), 1024 - strlen(sub_buf), "%s ", lang->value);
-            } else {
-                // FIXME: ignore for now; language seem to be missing in .vob files
-                //sprintf(sub_buf + strlen(sub_buf), "? ");
-            }
-            continue;
-        }
-
-        if (gb_v_verbose > 0) {
-            sprintf_s(buf + strlen(buf), buf_len - strlen(buf), "Stream %d", i);
-            if (flags & AVFMT_SHOW_IDS) {
-                sprintf_s(buf + strlen(buf), buf_len - strlen(buf), "[0x%x]", st->id);
-            }
-            /*
-            int g = ff_gcd(st->time_base.num, st->time_base.den);
-            sprintf(buf + strlen(buf), ", %d/%d", st->time_base.num/g, st->time_base.den/g);
-            */
-            sprintf(buf + strlen(buf), ": ");
-        }
-
-        avcodec_string(codec_buf, sizeof(codec_buf), st->codec, 0);
-        // remove [PAR DAR] from string, it's not very useful.
-        char *begin = NULL, *end = NULL;
-        if ((begin=strstr(codec_buf, " [PAR")) != NULL 
-            && (end=strchr(begin, ']')) != NULL) {
-            while (*++end != '\0') {
-                *begin++ = *end;
-            }
-            *begin = '\0';
-        }
-        sprintf(buf + strlen(buf), codec_buf);
-
-        if (st->codec->codec_type == AVMEDIA_TYPE_VIDEO){
-            if (st->r_frame_rate.den && st->r_frame_rate.num)
-                sprintf(buf + strlen(buf), ", %5.2f fps(r)", av_q2d(st->r_frame_rate));
-            //else if(st->time_base.den && st->time_base.num)
-            //  sprintf(buf + strlen(buf), ", %5.2f fps(m)", 1/av_q2d(st->time_base));
-            else
-                sprintf(buf + strlen(buf), ", %5.2f fps(c)", 1/av_q2d(st->codec->time_base));
-
-            // show aspect ratio
-            int scaled_src_width, scaled_src_height;
-            calc_scale_src(st->codec->width, st->codec->height, sample_aspect_ratio,
-                &scaled_src_width, &scaled_src_height);
-            if (scaled_src_width != st->codec->width || scaled_src_height != st->codec->height) {
-                sprintf(buf + strlen(buf), " => %dx%d", scaled_src_width, scaled_src_height);
-            }
-        }
-		AVDictionaryEntry *lang = av_dict_get(st->metadata, "language", NULL, 0);
-        if (strlen(lang->value) > 0) {
-            sprintf(buf + strlen(buf), " (%s)", lang->value);
-        }
-        sprintf(buf + strlen(buf), NEWLINE);
-    }
-
-    if (0 < strlen(sub_buf)) {
-        sprintf(buf + strlen(buf), "Subtitles: %s\n", sub_buf);
-    }
-}
-
-/*
-modified from libavformat's dump_format
-*/
-void
-get_stream_info(AVFormatContext *ic, char *url, int strip_path, AVRational sample_aspect_ratio,
-						unsigned char * buf, size_t buf_len)
-{
-    int duration = -1;
-
-    char *file_name = url;
-    if (1 == strip_path) {
-        file_name = path_2_file(url);
-    }
-
-    sprintf_s(buf, buf_len, "File: %s", file_name);
-	int64_t file_size = avio_size(ic);
-    sprintf_s(buf + strlen(buf), buf_len - strlen(buf), "%sSize: %"PRId64" bytes (%s)", NEWLINE, file_size, format_size(file_size, "B"));
-    if (ic->duration != AV_NOPTS_VALUE) { // FIXME: gcc warning: comparison between signed and unsigned
-        int hours, mins, secs;
-        duration = secs = ic->duration / AV_TIME_BASE;
-        mins = secs / 60;
-        secs %= 60;
-        hours = mins / 60;
-        mins %= 60;
-        sprintf(buf + strlen(buf), ", duration: %02d:%02d:%02d", hours, mins, secs);
-    } else {
-        sprintf(buf + strlen(buf), ", duration: N/A");
-    }
-    /*
-    if (ic->start_time != AV_NOPTS_VALUE) {
-        int secs, us;
-        secs = ic->start_time / AV_TIME_BASE;
-        us = ic->start_time % AV_TIME_BASE;
-        sprintf(buf + strlen(buf), ", start: %d.%06d", secs, (int)av_rescale(us, 1000000, AV_TIME_BASE));
-    }
-    */
-
-    // some formats, eg. flv, dont seem to support bit_rate, so we'll prefer to 
-    // calculate from duration.
-    // is this ok? probably not ok with .vob files when duration is wrong. DEBUG
-    if (duration > 0) {
-        sprintf_s(buf + strlen(buf), buf_len - strlen(buf), ", avg.bitrate: %.0f kb/s%s", (double)file_size * 8 / duration / 1000, NEWLINE);
-    } else if (ic->bit_rate) {
-        sprintf_s(buf + strlen(buf), buf_len - strlen(buf), ", bitrate: %d kb/s%s", ic->bit_rate / 1000, NEWLINE);
-    } else {
-        sprintf_s(buf + strlen(buf), buf_len - strlen(buf), ", bitrate: N/A%s", NEWLINE);
-    }
-
-    get_stream_info_type(ic, AVMEDIA_TYPE_AUDIO, buf, buf_len, sample_aspect_ratio);
-    get_stream_info_type(ic, AVMEDIA_TYPE_VIDEO, buf, buf_len, sample_aspect_ratio);
-    get_stream_info_type(ic, AVMEDIA_TYPE_SUBTITLE, buf, buf_len, sample_aspect_ratio);
-    // CODEC_TYPE_DATA FIXME: what is this type?
-    // CODEC_TYPE_NB FIXME: what is this type?
-}
-
-void dump_format_context(AVFormatContext *p, CHECK_RESULT  int index, char *url, CHECK_RESULT int  is_output)
-{
-    av_log(NULL, AV_LOG_ERROR, "\n");
-    av_log(NULL, AV_LOG_VERBOSE, "***dump_format_context, name: %s, long_name: %s\n", 
-        p->iformat->name, p->iformat->long_name);
-    //dump_format(p, index, url, is_output);
-
-    // dont show scaling info at this time because we dont have the proper sample_aspect_ratio
-	unsigned char buf[4096]; // FIXME: this is also used for all text at the top
-	get_stream_info(p, url, 0, (AVRational)GB_A_RATIO, buf, 4096);
-	av_log(NULL, LOG_INFO, buf);
-
-	int64_t file_size = avio_size(p);
-    av_log(NULL, AV_LOG_VERBOSE, "start_time av: %"PRId64", duration av: %"PRId64", file_size: %"PRId64"\n",
-        p->start_time, p->duration, file_size);
-    av_log(NULL, AV_LOG_VERBOSE, "start_time s: %.2f, duration s: %.2f\n",
-        (double) p->start_time / AV_TIME_BASE, (double) p->duration / AV_TIME_BASE);
-	
-	AVDictionaryEntry *track = av_dict_get(p->metadata, "track", NULL, 0);
-    if (track->value[0] != '\0')
-        av_log(NULL, LOG_INFO, "  Track: %s\n", track->value);
-	
-	AVDictionaryEntry *title = av_dict_get(p->metadata, "title", NULL, 0);
-    if (title->value[0] != '\0')
-        av_log(NULL, LOG_INFO, "  Title: %s\n", title->value);
-
-	AVDictionaryEntry *artist = av_dict_get(p->metadata, "artist", NULL, 0);
-    if (artist->value[0] != '\0')
-        av_log(NULL, LOG_INFO, "  Artist: %s\n", artist->value);
-
-	AVDictionaryEntry *copyright = av_dict_get(p->metadata, "copyright", NULL, 0);
-    if (copyright->value[0] != '\0')
-        av_log(NULL, LOG_INFO, "  Copyright: %s\n", copyright->value);
-
-	AVDictionaryEntry *comment = av_dict_get(p->metadata, "comment", NULL, 0);
-    if (comment->value[0] != '\0')
-        av_log(NULL, LOG_INFO, "  Comment: %s\n", comment->value);
-
-	AVDictionaryEntry *album = av_dict_get(p->metadata, "album", NULL, 0);
-    if (album->value[0] != '\0')
-        av_log(NULL, LOG_INFO, "  Album: %s\n", album->value);
-
-	AVDictionaryEntry *date = av_dict_get(p->metadata, "date", NULL, 0);
-    if (date->value[0] != '\0')
-        av_log(NULL, LOG_INFO, "  Year: %s\n", date->value);
-
-	AVDictionaryEntry *genre = av_dict_get(p->metadata, "genre", NULL, 0);
-    if (genre->value[0] != '\0')
-        av_log(NULL, LOG_INFO, "  Genre: %s\n", genre->value);
-}
 
 /*
 */
@@ -1495,7 +1311,7 @@ void make_thumbnail(char *file)
     thumb_new(&tn);
     // shot sh; // shot info
     shot fill_buffer[GB_C_COLUMN - 1]; // skipped shots to fill the last row
-    for (i=0; i<gb_c_column-1; i++) {
+    for (i=0; i<GB_C_COLUMN - 1; i++) {
         fill_buffer[i].ip = NULL;
     }
     int nb_shots = 0; // # of decoded shots (stat purposes)
@@ -1602,7 +1418,8 @@ void make_thumbnail(char *file)
         av_log(NULL, AV_LOG_ERROR, "\n%s: av_find_stream_info %s failed: %d\n", gb_argv0, file, ret);
         goto cleanup;
     }
-    dump_format_context(pFormatCtx, nb_file, file, 0);
+    //dump_format_context(pFormatCtx, nb_file, file, 0);
+	av_dump_format(pFormatCtx, nb_file, file, 0);
 
     // Find the first video stream
     // int av_find_default_stream_index(AVFormatContext *s)
@@ -1810,8 +1627,9 @@ void make_thumbnail(char *file)
 
 	char buf[4096]; // FIXME: this is also used for all text at the top
 	char *buf_end = buf + strlen(buf);
-    get_stream_info(pFormatCtx, file, 1, sample_aspect_ratio,
-						buf, 4096); // FIXME: using function's static buffer
+
+	av_dump_format(pFormatCtx, 0, file, 0);
+
     if (NULL != info_fp) {
         fprintf(info_fp, buf);
     }
